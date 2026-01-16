@@ -2,6 +2,24 @@ services:
   # =============================================================================
   # KAFKA CLUSTER (3 брокера, KRaft, без ZooKeeper)
   # =============================================================================
+  kafka-init:
+    image: apache/kafka:3.7.1
+    container_name: kafka-init
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --if-not-exists \
+          --topic clickstream-events-raw --partitions 6 --replication-factor 2
+        echo "Kafka topics created"
+    networks:
+      - clickstream-net
+    restart: "no"
+
   kafka-1:
     image: apache/kafka:3.7.1
     container_name: kafka-1
@@ -117,17 +135,97 @@ services:
       - clickstream-net
 
   # =============================================================================
-  # CLICKHOUSE
+  # CLICKHOUSE KEEPER (координация репликации вместо ZooKeeper)
   # =============================================================================
-  clickhouse:
+  clickhouse-keeper:
     image: clickhouse/clickhouse-server:24.3
-    container_name: clickhouse
-    hostname: clickhouse
+    container_name: clickhouse-keeper
+    hostname: clickhouse-keeper
+    command: ["clickhouse-keeper", "--config-file=/etc/clickhouse-keeper/keeper_config.xml"]
+    volumes:
+      - ch_keeper_data:/var/lib/clickhouse-keeper
+      - ./configs/clickhouse/keeper_config.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -lc 'exec 3<>/dev/tcp/127.0.0.1/2181'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - clickstream-net
+
+  # =============================================================================
+  # CLICKHOUSE REPLICA 1
+  # =============================================================================
+  clickhouse-1:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: clickhouse-1
+    hostname: clickhouse-1
     ports:
       - "8123:8123"   # HTTP
       - "9000:9000"   # Native
     volumes:
-      - ch_data:/var/lib/clickhouse
+      - clickhouse1_data:/var/lib/clickhouse
+      - ./configs/clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml:ro
+      - ./configs/clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./configs/clickhouse/macros-1.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+    depends_on:
+      clickhouse-keeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      clickstream-net:
+        aliases:
+          - clickhouse
+
+
+  # =============================================================================
+  # CLICKHOUSE REPLICA 2
+  # =============================================================================
+  clickhouse-2:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: clickhouse-2
+    hostname: clickhouse-2
+    ports:
+      - "8124:8123"   # HTTP (вторая реплика наружу)
+      - "9001:9000"   # Native
+    volumes:
+      - clickhouse2_data:/var/lib/clickhouse
+      - ./configs/clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml:ro
+      - ./configs/clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./configs/clickhouse/macros-2.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+    depends_on:
+      clickhouse-keeper:
+        condition: service_healthy
+    networks:
+      - clickstream-net
+
+  # =============================================================================
+  # CLICKHOUSE INIT
+  # =============================================================================
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: clickhouse-init
+    depends_on:
+      clickhouse-1:
+        condition: service_healthy
+      clickhouse-2:
+        condition: service_started
+    volumes:
+      - ./migrations/clickhouse:/migrations:ro
+    entrypoint: >
+      bash -lc "
+        echo 'Waiting ClickHouse...' &&
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+          clickhouse-client --host clickhouse-1 --query 'SELECT 1' && break || sleep 2;
+        done &&
+        echo 'Apply migrations...' &&
+        clickhouse-client --host clickhouse-1 --multiquery < /migrations/001_init.sql &&
+        echo 'ClickHouse initialized successfully'
+      "
     networks:
       - clickstream-net
 
@@ -316,7 +414,9 @@ volumes:
   kafka1_data:
   kafka2_data:
   kafka3_data:
-  ch_data:
+  ch_keeper_data:
+  clickhouse1_data:
+  clickhouse2_data:
   pg_data:
   airflow_dags:
   airflow_logs:
