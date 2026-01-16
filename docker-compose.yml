@@ -135,6 +135,31 @@ services:
       - clickstream-net
 
   # =============================================================================
+  # API
+  # =============================================================================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: api
+    hostname: api
+    ports:
+      - "8081:8081"
+    environment:
+      API_HOST: "0.0.0.0"
+      API_PORT: "8081"
+      CLICKHOUSE_TABLE: raw_events
+      CLICKHOUSE_HTTP_URLS: "http://clickhouse-1:8123,http://clickhouse-2:8123"
+      CLICKHOUSE_DB: clickstream
+      CLICKHOUSE_USER: clickstream
+      CLICKHOUSE_PASSWORD: clickstream123
+    depends_on:
+      clickhouse-init:
+        condition: service_completed_successfully
+    networks:
+      - clickstream-net
+
+  # =============================================================================
   # CLICKHOUSE KEEPER (координация репликации вместо ZooKeeper)
   # =============================================================================
   clickhouse-keeper:
