@@ -159,6 +159,78 @@ services:
     networks:
       - clickstream-net
 
+# =============================================================================
+# GENERATORS
+# =============================================================================
+  generator-http:
+    build:
+      context: ./generator
+      dockerfile: Dockerfile
+    container_name: generator-http
+    hostname: generator-http
+    depends_on:
+      - api
+    command:
+      - --http
+      - http://api:8081/events
+      - --count
+      - "0"
+      - --batch
+      - "10"
+      - --rate
+      - "10"
+    networks:
+      - clickstream-net
+    restart: unless-stopped
+
+  generator-kafka:
+    build:
+      context: ./generator
+      dockerfile: Dockerfile
+    container_name: generator-kafka
+    hostname: generator-kafka
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    command:
+      - --kafka
+      - kafka-1:9092,kafka-2:9092,kafka-3:9092
+      - --topic
+      - clickstream-events-raw
+      - --count
+      - "0"
+      - --rate
+      - "50"
+    networks:
+      - clickstream-net
+    restart: unless-stopped
+
+  generator-csv:
+    build:
+      context: ./generator
+      dockerfile: Dockerfile
+    container_name: generator-csv
+    hostname: generator-csv
+    depends_on:
+      - minio
+    environment:
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: click-analysis
+      MINIO_ROTATE_EVERY: "2000"
+    command:
+      - --count
+      - "0"
+      - --rate
+      - "100"
+      - --days-back
+      - "100"
+    networks:
+      - clickstream-net
+    restart: unless-stopped
+
   # =============================================================================
   # CLICKHOUSE KEEPER (координация репликации вместо ZooKeeper)
   # =============================================================================
