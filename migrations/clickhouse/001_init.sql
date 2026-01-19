@@ -102,9 +102,10 @@ ALTER TABLE clickstream.invalid_events ON CLUSTER clickstream_cluster
 MODIFY TTL toDateTime(received_time) + INTERVAL 30 DAY DELETE;
 
 -- =============================================================================
--- 3) CLEAN: очищенные и валидные события (источник для витрин)
+-- 3) VALID: валидные события (после проверки из RAW)
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS clickstream.clean_events ON CLUSTER clickstream_cluster
+
+CREATE TABLE IF NOT EXISTS clickstream.valid_events ON CLUSTER clickstream_cluster
 (
     event_id UUID,
     event_time DateTime64(3),
@@ -132,17 +133,17 @@ CREATE TABLE IF NOT EXISTS clickstream.clean_events ON CLUSTER clickstream_clust
     cleaned_time DateTime64(3) DEFAULT now64(3),
     ingest_run_id String
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/clean_events', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/valid_events', '{replica}')
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (event_time, user_id, session_id);
 
 -- =============================================================================
--- 4) Единая валидация RAW -> CLEAN / INVALID (для HTTP/Kafka/CSV)
+-- 4) Единая валидация RAW -> VALID / INVALID (для HTTP/Kafka/CSV)
 -- =============================================================================
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS clickstream.mv_raw_to_clean
+CREATE MATERIALIZED VIEW IF NOT EXISTS clickstream.mv_raw_to_valid
 ON CLUSTER clickstream_cluster
-TO clickstream.clean_events
+TO clickstream.valid_events
 AS
 SELECT
     event_id,
@@ -222,6 +223,7 @@ WHERE NOT (
 --    1 Kafka-table -> 1 MV -> raw_events (source='kafka')
 --    Дальше валид/невалид обработается общими MV выше.
 -- =============================================================================
+
 CREATE TABLE IF NOT EXISTS clickstream.raw_events_kafka
 ON CLUSTER clickstream_cluster
 (
@@ -239,7 +241,7 @@ SETTINGS
     kafka_num_consumers = 1,
     kafka_handle_error_mode = 'stream';
 
-CREATE MATERIALIZED VIEW clickstream.mv_kafka_to_raw
+CREATE MATERIALIZED VIEW IF NOT EXISTS clickstream.mv_kafka_to_raw
 ON CLUSTER clickstream_cluster
 TO clickstream.raw_events
 AS
@@ -276,6 +278,81 @@ SELECT
   '' AS ingest_run_id
 FROM clickstream.raw_events_kafka;
 -- =============================================================================
+-- 5.1) ETL STATE + PREPARED / AGG TABLES (используются DAG 02 и последующими)
+-- =============================================================================
+
+-- Watermark / состояние пайплайнов
+CREATE TABLE IF NOT EXISTS clickstream.etl_state ON CLUSTER clickstream_cluster
+(
+  pipeline LowCardinality(String),
+  last_ts DateTime64(3)
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/etl_state', '{replica}')
+ORDER BY pipeline;
+
+-- Дедуплицированные и «подготовленные» события (нормализация URL + извлечение ключей из props_json)
+CREATE TABLE IF NOT EXISTS clickstream.prepared_events ON CLUSTER clickstream_cluster
+(
+  dedup_key String,
+  prepared_time DateTime64(3),
+
+  event_id UUID,
+  event_time DateTime64(3),
+  cleaned_time DateTime64(3),
+
+  user_id String,
+  session_id String,
+  device_id String,
+
+  event_type LowCardinality(String),
+  page_url String,
+  page_path String,
+  page_query String,
+
+  referrer String,
+  user_agent String,
+  ip String,
+
+  props_json String,
+  props_event_title LowCardinality(String),
+  props_element_id LowCardinality(String),
+  props_x Int32,
+  props_y Int32,
+
+  source LowCardinality(String),
+  source_topic LowCardinality(String),
+  source_partition Int32,
+  source_offset Int64,
+  source_object String,
+  source_row_number UInt64,
+  ingest_run_id String
+)
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/clickstream/prepared_events', '{replica}', prepared_time)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (dedup_key);
+
+-- Пример агрегатов по сессиям в 5-минутных окнах (можно расширять)
+CREATE TABLE IF NOT EXISTS clickstream.session_metrics_5m ON CLUSTER clickstream_cluster
+(
+  window_start DateTime,
+  session_id String,
+  user_id String,
+
+  events_count UInt64,
+  clicks UInt64,
+  views UInt64,
+  purchases UInt64,
+  logins UInt64,
+  signups UInt64,
+  logouts UInt64,
+
+  uniq_pages UInt64
+)
+ENGINE = ReplicatedSummingMergeTree('/clickhouse/tables/{shard}/clickstream/session_metrics_5m', '{replica}')
+PARTITION BY toYYYYMM(window_start)
+ORDER BY (window_start, session_id, user_id);
+
+-- =============================================================================
 -- 6) ANALYTICS
 -- =============================================================================
 
@@ -289,7 +366,9 @@ ON CLUSTER clickstream_cluster
     sessions UInt64,
     views UInt64,
     clicks UInt64,
+    purchases UInt64,
     ctr Float32,
+    conversion Float32,
     invalid_events UInt64,
     invalid_share Float32,
     avg_events_per_session Float32,
