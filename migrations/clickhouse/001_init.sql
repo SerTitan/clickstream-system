@@ -448,3 +448,81 @@ ON CLUSTER clickstream_cluster
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/user_cohorts_daily', '{replica}', calculated_at)
 PARTITION BY toYYYYMM(day)
 ORDER BY (day);
+
+-- =============================================================================
+-- 7) SEED DATA: тестовые данные для Superset (удаляются при реальном заполнении)
+--    Нужны чтобы дашборды работали сразу после docker-compose up
+-- =============================================================================
+
+-- Seed: kpi_daily (последние 7 дней)
+INSERT INTO analytics.kpi_daily (day, events, users, sessions, views, clicks, purchases, ctr, conversion, invalid_events, invalid_share, avg_events_per_session)
+SELECT
+    toDate(now()) - number AS day,
+    rand() % 10000 + 1000 AS events,
+    rand() % 500 + 100 AS users,
+    rand() % 800 + 150 AS sessions,
+    rand() % 5000 + 500 AS views,
+    rand() % 1000 + 100 AS clicks,
+    rand() % 50 + 5 AS purchases,
+    0.15 + (rand() % 10) / 100.0 AS ctr,
+    0.01 + (rand() % 5) / 1000.0 AS conversion,
+    rand() % 100 AS invalid_events,
+    0.01 AS invalid_share,
+    5.5 + (rand() % 30) / 10.0 AS avg_events_per_session
+FROM numbers(7)
+WHERE NOT EXISTS (SELECT 1 FROM analytics.kpi_daily LIMIT 1);
+
+-- Seed: pages_daily
+INSERT INTO analytics.pages_daily (day, page_url, views, clicks, users, sessions, ctr, avg_props_size)
+SELECT
+    toDate(now()) - (number % 7) AS day,
+    arrayElement(['/home', '/products', '/cart', '/checkout', '/about', '/contact', '/blog', '/faq', '/pricing', '/login'], (number % 10) + 1) AS page_url,
+    rand() % 1000 + 100 AS views,
+    rand() % 200 + 20 AS clicks,
+    rand() % 100 + 10 AS users,
+    rand() % 150 + 15 AS sessions,
+    0.15 + (rand() % 15) / 100.0 AS ctr,
+    50.0 + rand() % 100 AS avg_props_size
+FROM numbers(70)
+WHERE NOT EXISTS (SELECT 1 FROM analytics.pages_daily LIMIT 1);
+
+-- Seed: session_quality_daily
+INSERT INTO analytics.session_quality_daily (day, sessions, avg_events_per_session, median_events_per_session, avg_duration_sec, median_duration_sec, bounce_rate)
+SELECT
+    toDate(now()) - number AS day,
+    rand() % 800 + 200 AS sessions,
+    4.5 + (rand() % 30) / 10.0 AS avg_events_per_session,
+    4.0 + (rand() % 20) / 10.0 AS median_events_per_session,
+    120.0 + rand() % 180 AS avg_duration_sec,
+    100.0 + rand() % 150 AS median_duration_sec,
+    0.25 + (rand() % 20) / 100.0 AS bounce_rate
+FROM numbers(7)
+WHERE NOT EXISTS (SELECT 1 FROM analytics.session_quality_daily LIMIT 1);
+
+-- Seed: referrer_daily
+INSERT INTO analytics.referrer_daily (day, referrer, events, users, sessions, views, clicks, ctr, traffic_share)
+SELECT
+    toDate(now()) - (number % 7) AS day,
+    arrayElement(['(direct)', 'google.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'bing.com', 'reddit.com'], (number % 7) + 1) AS referrer,
+    rand() % 2000 + 200 AS events,
+    rand() % 200 + 20 AS users,
+    rand() % 300 + 30 AS sessions,
+    rand() % 1000 + 100 AS views,
+    rand() % 200 + 20 AS clicks,
+    0.15 + (rand() % 15) / 100.0 AS ctr,
+    (rand() % 30 + 5) / 100.0 AS traffic_share
+FROM numbers(49)
+WHERE NOT EXISTS (SELECT 1 FROM analytics.referrer_daily LIMIT 1);
+
+-- Seed: user_cohorts_daily
+INSERT INTO analytics.user_cohorts_daily (day, new_users, returning_users, new_share, heavy_users, medium_users, light_users)
+SELECT
+    toDate(now()) - number AS day,
+    rand() % 100 + 20 AS new_users,
+    rand() % 300 + 50 AS returning_users,
+    0.2 + (rand() % 20) / 100.0 AS new_share,
+    rand() % 50 + 10 AS heavy_users,
+    rand() % 150 + 30 AS medium_users,
+    rand() % 200 + 40 AS light_users
+FROM numbers(7)
+WHERE NOT EXISTS (SELECT 1 FROM analytics.user_cohorts_daily LIMIT 1);

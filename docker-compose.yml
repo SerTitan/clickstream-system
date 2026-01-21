@@ -176,9 +176,9 @@ services:
       - --count
       - "0"
       - --batch
-      - "10"
+      - "100"
       - --rate
-      - "10"
+      - "300"
     networks:
       - clickstream-net
     restart: unless-stopped
@@ -201,7 +201,7 @@ services:
       - --count
       - "0"
       - --rate
-      - "50"
+      - "200"
     networks:
       - clickstream-net
     restart: unless-stopped
@@ -219,12 +219,12 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin123
       MINIO_BUCKET: click-analysis
-      MINIO_ROTATE_EVERY: "2000"
+      MINIO_ROTATE_EVERY: "5000"
     command:
       - --count
       - "0"
       - --rate
-      - "100"
+      - "300"
       - --days-back
       - "100"
     networks:
@@ -470,16 +470,87 @@ services:
   # MONITORING — Prometheus + Grafana
   # =============================================================================
   prometheus:
-    image: prom/prometheus:v2.48.0
-    container_name: prometheus
-    ports:
-      - "9090:9090"
+    image: prom/prometheus:latest
     volumes:
-      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./configs/prometheus:/etc/prometheus:ro
       - prom_data:/prometheus
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - clickstream-net
+    restart: unless-stopped
+
+
+  # =============================================================================
+  # EXPORTERS
+  # =============================================================================
+
+  # Метрики контейнеров: CPU/RAM/FS/NET
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=10s
+      - --store_container_labels=true
+      - --allow_dynamic_housekeeping=true
+      - --storage_driver=
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8089:8080"
+    networks:
+      - clickstream-net
+
+  # Метрики Kafka (consumer lag, offsets и т.д.)
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command:
+      - --kafka.server=kafka-1:9092
+      - --kafka.server=kafka-2:9092
+      - --kafka.server=kafka-3:9092
+      - --offset.show-all
+    ports:
+      - "9308:9308"
+    networks:
+      - clickstream-net
+    restart: unless-stopped
+
+
+  # Метрики ClickHouse (queries, merges, parts, memory, etc.)
+  clickhouse-exporter:
+    image: f1yegor/clickhouse-exporter:latest
+    container_name: clickhouse-exporter
+    command:
+      - -scrape_uri=http://clickhouse-1:8123
+      - -telemetry.address=:9116
+    ports:
+      - "9116:9116"
+    depends_on:
+      - clickhouse-1
+    networks:
+      - clickstream-net
+
+  # Пробы доступности/латентности (HTTP) для API/ClickHouse/Kafka UI
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    volumes:
+      - ./configs/prometheus:/etc/blackbox_exporter:ro
+    command:
+      - --config.file=/etc/blackbox_exporter/blackbox.yml
+    ports:
+      - "9115:9115"
     networks:
       - clickstream-net
 
@@ -494,42 +565,16 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
     networks:
       - clickstream-net
 
-    # =============================================================================
+  # =============================================================================
   # SUPERSET
   # =============================================================================
-  superset-init:
-    image: apache/superset:4.0.2
-    container_name: superset-init
-    environment:
-      SUPERSET_SECRET_KEY: "CHANGE_ME_SUPERSET_SECRET"
-      SUPERSET_HOME: /app/superset_home
-    volumes:
-      - superset_home:/app/superset_home
-    depends_on:
-      postgres:
-        condition: service_healthy
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        superset db upgrade
-        superset fab create-admin \
-          --username admin \
-          --firstname Admin \
-          --lastname User \
-          --email admin@example.com \
-          --password admin || true
-        superset init
-        echo "Superset initialized"
-    networks:
-      - clickstream-net
-    restart: "no"
-
   superset:
     image: apache/superset:4.0.2
     container_name: superset
@@ -538,13 +583,68 @@ services:
     environment:
       SUPERSET_SECRET_KEY: "CHANGE_ME_SUPERSET_SECRET"
       SUPERSET_HOME: /app/superset_home
+      # Для init_dashboards.py
+      SUPERSET_URL: "http://localhost:8088"
+      SUPERSET_USER: "admin"
+      SUPERSET_PASS: "admin"
+      CLICKHOUSE_HOST: "clickhouse-1"
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: "clickstream"
+      CLICKHOUSE_PASS: "clickstream123"
     volumes:
       - superset_home:/app/superset_home
+      - ./configs/superset:/app/init:ro
     depends_on:
-      superset-init:
+      postgres:
+        condition: service_healthy
+      clickhouse-init:
         condition: service_completed_successfully
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "=== Installing dependencies ==="
+        pip install clickhouse-connect requests > /dev/null
+
+        echo "=== Initializing Superset DB ==="
+        superset db upgrade
+
+        echo "=== Creating admin user ==="
+        superset fab create-admin \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --email admin@example.com \
+          --password admin || true
+        superset init
+
+        echo "=== Starting Superset server in background ==="
+        superset run -h 0.0.0.0 -p 8088 --with-threads &
+        SUPERSET_PID=$$!
+
+        echo "=== Waiting for Superset to be healthy ==="
+        for i in $$(seq 1 60); do
+          if curl -sf http://localhost:8088/health > /dev/null 2>&1; then
+            echo "Superset is healthy"
+            break
+          fi
+          echo "Waiting for Superset... ($$i/60)"
+          sleep 2
+        done
+
+        echo "=== Running dashboard initialization ==="
+        python /app/init/init_dashboards.py || echo "Dashboard init failed (will retry on next restart)"
+
+        echo "=== Superset ready ==="
+        wait $$SUPERSET_PID
     networks:
       - clickstream-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8088/health > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   # =============================================================================
   # MINIO (S3 storage for CSV)

@@ -1,7 +1,48 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: "prometheus"
     static_configs:
       - targets: ["prometheus:9090"]
+
+  # API: RPS + latency + in-flight
+  - job_name: "api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8081"]
+
+  # ClickHouse (через exporter, чтобы не зависеть от http-handler /metrics)
+  - job_name: "clickhouse"
+    static_configs:
+      - targets: ["clickhouse-exporter:9116"]
+
+  # Kafka: consumer lag / offsets
+  - job_name: "kafka"
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  # Контейнерные ресурсы
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Blackbox: status + latency (компоненты)
+  - job_name: "blackbox_http"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://api:8081/health
+          - http://clickhouse-1:8123/ping
+          - http://clickhouse-2:8123/ping
+          - http://kafka-ui:8080
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
