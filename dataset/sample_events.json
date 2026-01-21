@@ -1,0 +1,174 @@
+[
+  {
+    "type": "view",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/",
+    "created_at": "2026-01-15T10:00:00Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "https://google.com/search?q=shop",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "page_load",
+      "element_id": "#main-content",
+      "x": 0,
+      "y": 0
+    }
+  },
+  {
+    "type": "click",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/catalog",
+    "created_at": "2026-01-15T10:00:15Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "navigation",
+      "element_id": "#nav-catalog",
+      "x": 150,
+      "y": 25
+    }
+  },
+  {
+    "type": "view",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/catalog?category=electronics",
+    "created_at": "2026-01-15T10:00:16Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/catalog",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "page_load",
+      "element_id": "#category-grid",
+      "x": 0,
+      "y": 0
+    }
+  },
+  {
+    "type": "click",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/product/42",
+    "created_at": "2026-01-15T10:01:30Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/catalog?category=electronics",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "product_click",
+      "element_id": "#product-42",
+      "x": 450,
+      "y": 320
+    }
+  },
+  {
+    "type": "view",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/product/42",
+    "created_at": "2026-01-15T10:01:31Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/catalog?category=electronics",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "product_view",
+      "element_id": "#product-detail",
+      "x": 0,
+      "y": 0
+    }
+  },
+  {
+    "type": "click",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/product/42",
+    "created_at": "2026-01-15T10:02:45Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/catalog?category=electronics",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "add_to_cart",
+      "element_id": "#add-to-cart-btn",
+      "x": 800,
+      "y": 400
+    }
+  },
+  {
+    "type": "purchase",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/checkout/success",
+    "created_at": "2026-01-15T10:05:00Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/checkout",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "checkout_complete",
+      "element_id": "#checkout-btn",
+      "x": 600,
+      "y": 500,
+      "order_id": "ORD-2026-001",
+      "total": 299.99
+    }
+  },
+  {
+    "type": "login",
+    "session_id": "sess-2002-1",
+    "user_id": 2002,
+    "url": "/login",
+    "created_at": "2026-01-15T11:00:00Z",
+    "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) Safari/604.1",
+    "referrer": "https://facebook.com",
+    "ip": "10.0.0.55",
+    "device_type": "mobile",
+    "payload": {
+      "event_title": "login_attempt",
+      "element_id": "#login-btn",
+      "x": 180,
+      "y": 450
+    }
+  },
+  {
+    "type": "signup",
+    "session_id": "sess-3003-1",
+    "user_id": 3003,
+    "url": "/register",
+    "created_at": "2026-01-15T12:30:00Z",
+    "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S928B) Chrome/122.0.6261.64 Mobile",
+    "referrer": "https://twitter.com",
+    "ip": "172.16.0.10",
+    "device_type": "mobile",
+    "payload": {
+      "event_title": "signup_attempt",
+      "element_id": "#signup-btn",
+      "x": 200,
+      "y": 600
+    }
+  },
+  {
+    "type": "logout",
+    "session_id": "sess-1001-1",
+    "user_id": 1001,
+    "url": "/account",
+    "created_at": "2026-01-15T10:30:00Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0",
+    "referrer": "/account/orders",
+    "ip": "192.168.1.100",
+    "device_type": "desktop",
+    "payload": {
+      "event_title": "logout",
+      "element_id": "#logout-btn",
+      "x": 1200,
+      "y": 50
+    }
+  }
+]
