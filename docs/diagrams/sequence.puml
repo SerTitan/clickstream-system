@@ -1,0 +1,62 @@
+@startuml sequence
+!theme plain
+
+title Clickstream Event Processing - Sequence Diagram
+
+participant "Web/Mobile App" as client
+participant "Generator (C++)" as generator
+participant "API Server (C++)" as api
+participant "Kafka Cluster" as kafka
+participant "ClickHouse" as ch
+participant "Airflow DAGs" as airflow
+participant "Superset/Grafana" as bi
+
+== Real-time HTTP Path ==
+
+client -> api: POST /events\n[{type, session_id, user_id, url, ...}]
+activate api
+api -> api: Validate JSON schema
+alt Validation OK
+  api -> ch: INSERT INTO raw_events
+  ch --> api: OK
+  api --> client: 200 {status: ok, accepted: N}
+else Validation Failed
+  api --> client: 400 {error: validation_failed}
+end
+deactivate api
+
+== Kafka Streaming Path ==
+
+generator -> kafka: Produce to\nclickstream-events-raw
+activate kafka
+kafka -> ch: Kafka Engine consumes
+ch -> ch: MV: raw_events_kafka -> raw_events
+ch -> ch: MV: raw_events -> valid_events / invalid_events
+deactivate kafka
+
+== Batch ETL Processing ==
+
+airflow -> airflow: DAG 01: CSV to Raw\n(MinIO -> raw_events)
+activate airflow
+
+airflow -> ch: DAG 02: Dedup & Prepare
+note right: valid_events -> prepared_events\n(ReplacingMergeTree для дедупликации)
+
+airflow -> ch: DAG 03: Fill Analytics Marts
+note right
+  prepared_events -> analytics.*
+  - kpi_daily
+  - pages_daily
+  - session_quality_daily
+  - referrer_daily
+  - user_cohorts_daily
+end note
+deactivate airflow
+
+== Analytics & Monitoring ==
+
+bi -> ch: SQL queries to analytics.*
+ch --> bi: Aggregated metrics
+bi -> bi: Render dashboards
+
+@enduml
