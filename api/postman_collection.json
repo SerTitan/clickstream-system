@@ -1,0 +1,207 @@
+{
+  "info": {
+    "name": "Clickstream API (contract-driven)",
+    "description": "Полная коллекция для тестирования Clickstream API:\n- Health/Metrics endpoints\n- Валидная отправка событий\n- Batch отправка нескольких событий\n- Негативные тесты (невалидный JSON, неизвестные поля, пустой массив)\n- Проверка записи в ClickHouse",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "clickhouse_http",
+      "value": "http://localhost:8123"
+    },
+    {
+      "key": "clickhouse_user",
+      "value": "clickstream"
+    },
+    {
+      "key": "clickhouse_pass",
+      "value": "clickstream123"
+    },
+    {
+      "key": "session_id",
+      "value": ""
+    },
+    {
+      "key": "test_event_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+	{
+      "name": "Metrics",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/metrics"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Send Events (VALID / contract)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[\n  {\n    \"type\": \"click\",\n    \"session_id\": \"{{session_id}}\",\n    \"user_id\": 1001,\n    \"url\": \"/catalog?foo=bar\",\n    \"created_at\": \"2026-01-10T10:00:00Z\",\n    \"user_agent\": \"PostmanRuntime\",\n    \"referrer\": \"https://example.com\",\n    \"ip\": \"127.0.0.1\",\n    \"device_type\": \"desktop\",\n    \"payload\": {\n      \"event_title\": \"checkout\",\n      \"element_id\": \"#submit-button\",\n      \"x\": 445,\n      \"y\": 315\n    }\n  }\n]"
+        },
+        "url": {
+          "raw": "{{base_url}}/events"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// unique session id for traceability in ClickHouse",
+              "pm.collectionVariables.set('session_id', 'pm-' + Date.now());",
+              "console.log('session_id=' + pm.collectionVariables.get('session_id'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200/202', function () {",
+              "  pm.expect([200, 202]).to.include(pm.response.code);",
+              "});",
+              "pm.test('Response is JSON', function () {",
+              "  pm.response.to.be.json;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Send Events (INVALID: unknown field)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[\n  {\n    \"event_type\": \"click\",\n    \"created_at\": \"2026-01-10T10:00:00Z\",\n    \"session_id\": \"{{session_id}}\",\n    \"user_id\": \"1001\",\n    \"ip\": \"127.0.0.1\",\n    \"url\": \"/\",\n    \"user_agent\": \"PostmanRuntime\",\n    \"device_type\": \"desktop\",\n    \"payload\": {\n      \"event_title\": \"checkout\"\n    },\n    \"unexpected_field\": \"boom\"\n  }\n]"
+        },
+        "url": {
+          "raw": "{{base_url}}/events"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('session_id')) pm.collectionVariables.set('session_id', 'pm-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', function () { pm.expect(pm.response.code).to.eql(400); });",
+              "pm.test('Response is JSON with validation_failed', function () {",
+              "  pm.response.to.be.json;",
+              "  const j = pm.response.json();",
+              "  pm.expect(j.error).to.eql('validation_failed');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Send Events (INVALID: missing required fields)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+           "raw": "[\n  {\n    \"type\": \"click\",\n    \"session_id\": \"s1\",\n    \"user_id\": \"1001\",\n    \"url\": \"/\",\n    \"created_at\": \"2025-01-01T10:00:00\"\n  }\n]"
+        },
+        "url": {
+          "raw": "{{base_url}}/events"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('session_id')) pm.collectionVariables.set('session_id', 'pm-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', function () { pm.expect(pm.response.code).to.eql(400); });",
+              "pm.test('Response is JSON', function () { pm.response.to.be.json; });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

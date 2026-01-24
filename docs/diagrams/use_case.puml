@@ -1,0 +1,59 @@
+@startuml use_case
+!theme plain
+skinparam actorStyle awesome
+
+title Clickstream Analytics - Use Case Diagram
+
+left to right direction
+
+actor "Web User" as webuser
+actor "Data Analyst" as analyst
+actor "DevOps Engineer" as devops
+actor "Data Engineer" as dataeng
+
+rectangle "Clickstream Analytics System" {
+  usecase "Generate clickstream events" as UC1
+  usecase "Send events via HTTP API" as UC2
+  usecase "Send events via Kafka" as UC3
+  usecase "Validate and store events" as UC4
+  usecase "Process ETL pipelines" as UC5
+  usecase "View analytics dashboards" as UC6
+  usecase "Query prepared data" as UC7
+  usecase "Monitor system health" as UC8
+  usecase "Upload CSV to MinIO" as UC9
+  usecase "Configure DAGs" as UC10
+}
+
+webuser --> UC1
+UC1 --> UC2 : HTTP
+UC1 --> UC3 : Kafka
+
+UC2 --> UC4
+UC3 --> UC4
+
+dataeng --> UC5
+dataeng --> UC9
+dataeng --> UC10
+
+analyst --> UC6
+analyst --> UC7
+
+devops --> UC8
+
+note right of UC4
+  Events validated by schema
+  Invalid events -> invalid_events table
+end note
+
+note right of UC5
+  DAG 01: CSV -> raw_events
+  DAG 02: Dedup & Prepare
+  DAG 03: Fill Analytics Marts
+end note
+
+note right of UC6
+  Superset: Business dashboards
+  Grafana: Technical metrics
+end note
+
+@enduml

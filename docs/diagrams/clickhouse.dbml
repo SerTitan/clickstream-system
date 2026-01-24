@@ -1,0 +1,327 @@
+Project clickstream_dwh {
+  database_type: 'ClickHouse'
+  Note: 'Clickstream Data Warehouse in ClickHouse'
+}
+
+// =============================================================================
+// CLICKSTREAM TABLES
+// =============================================================================
+
+Table raw_events {
+  event_id UUID [pk, default: `generateUUIDv4()`]
+  event_time DateTime64(3)
+  received_time DateTime64(3) [default: `now64(3)`]
+  
+  user_id String
+  session_id String
+  device_id String
+  
+  event_type LowCardinality(String)
+  page_url String
+  referrer String
+  user_agent String
+  ip String
+  
+  props_json String
+  
+  source LowCardinality(String) [default: `'http'`]
+  source_topic LowCardinality(String) [default: `''`]
+  source_partition Int32 [default: `-1`]
+  source_offset Int64 [default: `-1`]
+  
+  source_object String [default: `''`]
+  source_row_number UInt64 [default: `0`]
+  
+  raw_payload String [default: `''`]
+  ingest_run_id String [default: `''`]
+  
+  Note: '''
+  Engine: ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/raw_events', '{replica}')
+  Partition: toYYYYMM(event_time)
+  Order by: (event_time, user_id, session_id)
+  TTL: toDateTime(event_time) + INTERVAL 30 DAY DELETE
+  '''
+}
+
+Table invalid_events {
+  received_time DateTime64(3) [default: `now64(3)`]
+  
+  event_id UUID
+  event_time DateTime64(3)
+  
+  user_id String
+  session_id String
+  device_id String
+  event_type String
+  page_url String
+  referrer String
+  user_agent String
+  ip String
+  props_json String
+  
+  source LowCardinality(String)
+  source_topic String
+  source_partition Int32
+  source_offset Int64
+  source_object String
+  source_row_number UInt64
+  ingest_run_id String
+  
+  raw_payload String
+  
+  error_code LowCardinality(String)
+  error_message String
+  
+  Note: '''
+  Engine: ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/invalid_events', '{replica}')
+  Partition: toYYYYMM(received_time)
+  Order by: (received_time, error_code)
+  TTL: toDateTime(received_time) + INTERVAL 30 DAY DELETE
+  '''
+}
+
+Table valid_events {
+  event_id UUID [pk]
+  event_time DateTime64(3)
+  
+  user_id String
+  session_id String
+  device_id String
+  
+  event_type LowCardinality(String)
+  page_url String
+  referrer String
+  
+  user_agent String
+  ip String
+  
+  props_json String
+  
+  source LowCardinality(String)
+  source_topic LowCardinality(String)
+  source_partition Int32
+  source_offset Int64
+  source_object String
+  source_row_number UInt64
+  
+  cleaned_time DateTime64(3) [default: `now64(3)`]
+  ingest_run_id String
+  
+  Note: '''
+  Engine: ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/valid_events', '{replica}')
+  Partition: toYYYYMM(event_time)
+  Order by: (event_time, user_id, session_id)
+  '''
+}
+
+Table raw_events_kafka {
+  raw_payload String
+  
+  Note: '''
+  Engine: Kafka
+  Settings:
+    kafka_broker_list: 'kafka-1:9092,kafka-2:9092,kafka-3:9092'
+    kafka_topic_list: 'clickstream-events-raw'
+    kafka_group_name: 'ch_raw_ingest'
+    kafka_format: 'JSONAsString'
+    kafka_num_consumers: 1
+    kafka_handle_error_mode: 'stream'
+  '''
+}
+
+Table etl_state {
+  pipeline LowCardinality(String) [pk]
+  last_ts DateTime64(3)
+  
+  Note: '''
+  Engine: ReplicatedMergeTree('/clickhouse/tables/{shard}/clickstream/etl_state', '{replica}')
+  Order by: pipeline
+  '''
+}
+
+Table prepared_events {
+  dedup_key String [pk]
+  prepared_time DateTime64(3)
+  
+  event_id UUID
+  event_time DateTime64(3)
+  cleaned_time DateTime64(3)
+  
+  user_id String
+  session_id String
+  device_id String
+  
+  event_type LowCardinality(String)
+  page_url String
+  page_path String
+  page_query String
+  
+  referrer String
+  user_agent String
+  ip String
+  
+  props_json String
+  props_event_title LowCardinality(String)
+  props_element_id LowCardinality(String)
+  props_x Int32
+  props_y Int32
+  
+  source LowCardinality(String)
+  source_topic LowCardinality(String)
+  source_partition Int32
+  source_offset Int64
+  source_object String
+  source_row_number UInt64
+  ingest_run_id String
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/clickstream/prepared_events', '{replica}', prepared_time)
+  Partition: toYYYYMM(event_time)
+  Order by: (dedup_key)
+  '''
+}
+
+Table session_metrics_5m {
+  window_start DateTime [pk]
+  session_id String [pk]
+  user_id String
+  
+  events_count UInt64
+  clicks UInt64
+  views UInt64
+  purchases UInt64
+  logins UInt64
+  signups UInt64
+  logouts UInt64
+  
+  uniq_pages UInt64
+  
+  Note: '''
+  Engine: ReplicatedSummingMergeTree('/clickhouse/tables/{shard}/clickstream/session_metrics_5m', '{replica}')
+  Partition: toYYYYMM(window_start)
+  Order by: (window_start, session_id, user_id)
+  '''
+}
+
+// =============================================================================
+// ANALYTICS TABLES
+// =============================================================================
+
+Table kpi_daily {
+  day Date [pk]
+  events UInt64
+  users UInt64
+  sessions UInt64
+  views UInt64
+  clicks UInt64
+  purchases UInt64
+  ctr Float32
+  conversion Float32
+  invalid_events UInt64
+  invalid_share Float32
+  avg_events_per_session Float32
+  calculated_at DateTime [default: `now()`]
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/kpi_daily', '{replica}', calculated_at)
+  Partition: toYYYYMM(day)
+  Order by: (day)
+  '''
+}
+
+Table pages_daily {
+  day Date [pk]
+  page_url String [pk]
+  
+  views UInt64
+  clicks UInt64
+  users UInt64
+  sessions UInt64
+  ctr Float32
+  avg_props_size Float32
+  calculated_at DateTime [default: `now()`]
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/pages_daily', '{replica}', calculated_at)
+  Partition: toYYYYMM(day)
+  Order by: (day, page_url)
+  '''
+}
+
+Table session_quality_daily {
+  day Date [pk]
+  
+  sessions UInt64
+  avg_events_per_session Float32
+  median_events_per_session Float32
+  avg_duration_sec Float32
+  median_duration_sec Float32
+  bounce_rate Float32
+  calculated_at DateTime [default: `now()`]
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/session_quality_daily', '{replica}', calculated_at)
+  Partition: toYYYYMM(day)
+  Order by: (day)
+  '''
+}
+
+Table referrer_daily {
+  day Date [pk]
+  referrer String [pk]
+  
+  events UInt64
+  users UInt64
+  sessions UInt64
+  views UInt64
+  clicks UInt64
+  ctr Float32
+  traffic_share Float32
+  calculated_at DateTime [default: `now()`]
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/referrer_daily', '{replica}', calculated_at)
+  Partition: toYYYYMM(day)
+  Order by: (day, referrer)
+  '''
+}
+
+Table user_cohorts_daily {
+  day Date [pk]
+  
+  new_users UInt64
+  returning_users UInt64
+  new_share Float32
+  heavy_users UInt64
+  medium_users UInt64
+  light_users UInt64
+  calculated_at DateTime [default: `now()`]
+  
+  Note: '''
+  Engine: ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/analytics/user_cohorts_daily', '{replica}', calculated_at)
+  Partition: toYYYYMM(day)
+  Order by: (day)
+  '''
+}
+
+// =============================================================================
+// RELATIONSHIPS (Conceptual - data flow)
+// =============================================================================
+
+// Kafka ingestion flow
+Ref: raw_events_kafka.raw_payload - raw_events.raw_payload [delete: cascade, update: cascade]
+
+// Validation flow (conceptual)
+Ref: raw_events.event_id - valid_events.event_id [delete: cascade, update: cascade]
+Ref: raw_events.event_id - invalid_events.event_id [delete: cascade, update: cascade]
+
+// ETL processing flow
+Ref: valid_events.event_id - prepared_events.event_id [delete: cascade, update: cascade]
+Ref: prepared_events.session_id - session_metrics_5m.session_id [delete: cascade, update: cascade]
+
+// Analytics data sources (conceptual relationships)
+Ref: valid_events.event_time - kpi_daily.day [delete: cascade, update: cascade]
+Ref: valid_events.page_url - pages_daily.page_url [delete: cascade, update: cascade]
+Ref: valid_events.session_id - session_quality_daily.sessions [delete: cascade, update: cascade]
+Ref: valid_events.referrer - referrer_daily.referrer [delete: cascade, update: cascade]
+Ref: valid_events.user_id - user_cohorts_daily.new_users [delete: cascade, update: cascade]

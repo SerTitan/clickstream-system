@@ -1,0 +1,77 @@
+@startuml activity
+!theme plain
+
+title Clickstream Event Processing - Activity Diagram (Data Flow)
+
+start
+
+partition "Data Ingestion" {
+  fork
+    :HTTP API receives event;
+    :Validate JSON schema;
+    if (Valid?) then (yes)
+      :Insert to raw_events;
+    else (no)
+      :Return 400 error;
+      stop
+    endif
+  fork again
+    :Generator produces to Kafka;
+    :Kafka Engine consumes message;
+    :Insert to raw_events via MV;
+  fork again
+    :CSV uploaded to MinIO;
+    :DAG 01 detects new file;
+    :Parse CSV and insert to raw_events;
+  end fork
+}
+
+partition "Validation (Materialized View)" {
+  :MV triggers on raw_events insert;
+  if (Event matches schema?) then (yes)
+    :Insert to valid_events;
+  else (no)
+    :Insert to invalid_events\nwith error_code and error_message;
+    stop
+  endif
+}
+
+partition "DAG 02: Dedup & Prepare" {
+  :Read valid_events since last watermark;
+  :Generate dedup_key\n(MD5 hash of event fields);
+  :Parse page_url -> path + query;
+  :Extract props from props_json;
+  :Insert to prepared_events\n(ReplacingMergeTree);
+  :Aggregate session_metrics_5m;
+  :Update etl_state watermark;
+}
+
+partition "DAG 03: Analytics Marts" {
+  :Read prepared_events for date range;
+  fork
+    :Calculate KPI daily\n(events, users, sessions, CTR, conversion);
+  fork again
+    :Calculate pages_daily\n(views, clicks per page);
+  fork again
+    :Calculate session_quality_daily\n(duration, bounce rate);
+  fork again
+    :Calculate referrer_daily\n(traffic sources);
+  fork again
+    :Calculate user_cohorts_daily\n(new vs returning, activity segments);
+  end fork
+  :Update etl_state watermark;
+}
+
+partition "Visualization" {
+  fork
+    :Superset reads analytics.*;
+    :Render business dashboards;
+  fork again
+    :Grafana reads Prometheus metrics;
+    :Render technical dashboards;
+  end fork
+}
+
+stop
+
+@enduml

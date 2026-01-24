@@ -1,0 +1,49 @@
+<clickhouse>
+  <zookeeper>
+    <node>
+      <host>clickhouse-keeper</host>
+      <port>2181</port>
+    </node>
+  </zookeeper>
+
+  <distributed_ddl>
+    <path>/clickhouse/task_queue/ddl</path>
+  </distributed_ddl>
+
+  <!-- Cluster topology: 1 shard, 2 replicas -->
+  <remote_servers>
+    <clickstream_cluster>
+      <shard>
+        <replica>
+          <host>clickhouse-1</host>
+          <port>9000</port>
+        </replica>
+        <replica>
+          <host>clickhouse-2</host>
+          <port>9000</port>
+        </replica>
+      </shard>
+    </clickstream_cluster>
+  </remote_servers>
+
+  <default_database>default</default_database>
+
+  <profiles>
+    <default>
+      <max_memory_usage>0</max_memory_usage>
+    </default>
+  </profiles>
+
+  <quotas>
+    <default>
+      <interval>
+        <duration>3600</duration>
+        <queries>0</queries>
+        <errors>0</errors>
+        <result_rows>0</result_rows>
+        <read_rows>0</read_rows>
+        <execution_time>0</execution_time>
+      </interval>
+    </default>
+  </quotas>
+</clickhouse>
